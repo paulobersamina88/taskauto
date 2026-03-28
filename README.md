@@ -1,39 +1,25 @@
-# IMDO Task Automator
+# IMDO Executive Dashboard
 
-A Streamlit prototype that parses pasted Google Sheet task blocks and turns them into:
+A Streamlit dashboard for pasted Google Sheet task blocks used by IMDO.
 
-- a clean task table
-- staff workload dashboard
-- project dashboard
-- action board sorted by urgency
+## Features
+- Parses tab-separated Google Sheet text
+- Supports UI, U, IN, NN, and D priority codes
+- Executive Summary tab with Red / Yellow / Green project health
+- Staff Dashboard with per-person filtering
+- Project Dashboard
+- Action Board with optional hiding of Done items
+- CSV export for parsed tasks and executive summary
 
 ## Run locally
-
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## How to use
-
-1. Copy rows from Google Sheets.
-2. Paste them into the text box in the sidebar.
-3. Review parsed tasks.
-4. Filter by staff, project, or priority.
-5. Download the parsed CSV if needed.
-
-## Current logic
-
-- Detects project headers
-- Parses owner, support, notes, and priority
-- Expands assigned staff from owner/support
-- Appends orphan continuation lines to the previous task note
-
-## Suggested next upgrades
-
-- due dates
-- editable status updates
-- Google Sheets API sync
-- automatic weekly report per staff
-- email reminder generation
-- color-coded Kanban board
+## Priority Codes
+- UI = Urgent and Important
+- U = Urgent, Not Important
+- IN = Important, Not Urgent
+- NN = Not Important, Not Urgent
+- D = Done

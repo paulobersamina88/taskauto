@@ -6,7 +6,7 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="IMDO Task Automator", layout="wide")
+st.set_page_config(page_title="IMDO Executive Dashboard", layout="wide")
 
 STATUS_MAP = {
     "UI": "Urgent & Important",
@@ -14,9 +14,11 @@ STATUS_MAP = {
     "U": "Urgent, Not Important",
     "NN": "Not Important, Not Urgent",
     "D": "Done",
+    "": "Unspecified",
 }
 
-STATUS_SORT = {"UI": 0, "U": 1, "IN": 2, "NN": 3, "D": 4}
+STATUS_SORT = {"UI": 0, "U": 1, "IN": 2, "NN": 3, "D": 4, "": 5}
+STATUS_SEQUENCE = ["UI", "U", "IN", "NN", "D", ""]
 
 DEFAULT_TEXT = """\
 \t\tOWNER\tSUPPORT\tSTATUS\tPriority
@@ -187,8 +189,55 @@ def download_df(df: pd.DataFrame) -> bytes:
     return out.getvalue()
 
 
-st.title("IMDO Task Automator")
-st.caption("Paste a portion of your Google Sheet, auto-parse it, and generate staff and project dashboards.")
+def compute_project_health(project_df: pd.DataFrame) -> Dict[str, object]:
+    counts = {code: int((project_df["priority_code"] == code).sum()) for code in STATUS_SEQUENCE}
+    total = len(project_df)
+    done = counts["D"]
+    ui = counts["UI"]
+    u = counts["U"]
+    in_count = counts["IN"]
+    nn = counts["NN"]
+    backlog = ui + u + in_count + nn + counts[""]
+    done_rate = done / total if total else 0.0
+
+    if total == 0:
+        signal, level = "⚪", "No Data"
+    elif backlog == 0 or done == total:
+        signal, level = "🟢", "Green"
+    elif ui > 0:
+        signal, level = "🔴", "Red"
+    elif u > 0 or in_count > 0:
+        signal, level = "🟡", "Yellow"
+    else:
+        signal, level = "🟢", "Green"
+
+    if level == "Red":
+        remark = "Immediate management attention needed."
+    elif level == "Yellow":
+        remark = "In progress; monitor and close remaining actions."
+    elif level == "Green":
+        remark = "Healthy or substantially completed."
+    else:
+        remark = "Awaiting encoded tasks."
+
+    return {
+        "health_signal": signal,
+        "health_level": level,
+        "total_tasks": total,
+        "done_tasks": done,
+        "done_rate_pct": round(done_rate * 100, 1),
+        "ui_tasks": ui,
+        "u_tasks": u,
+        "in_tasks": in_count,
+        "nn_tasks": nn,
+        "blank_tasks": counts[""],
+        "backlog_tasks": backlog,
+        "executive_remark": remark,
+    }
+
+
+st.title("IMDO Executive Dashboard")
+st.caption("Paste a portion of your Google Sheet, then generate executive-level and staff-level task monitoring.")
 
 with st.sidebar:
     st.header("Input")
@@ -206,6 +255,8 @@ with st.sidebar:
     st.write("IN = Important, Not Urgent")
     st.write("NN = Not Important, Not Urgent")
     st.write("D = Done")
+    st.markdown("---")
+    show_done_in_action_board = st.checkbox("Show Done items in Action Board", value=False)
 
 
 df = parse_imdo_text(raw_text)
@@ -215,10 +266,9 @@ if df.empty:
     st.stop()
 
 staff_df = build_staff_view(df)
-
 all_staff = sorted([x for x in staff_df["staff"].dropna().unique().tolist() if x])
 all_projects = sorted(df["project"].dropna().unique().tolist())
-all_codes = [code for code in ["UI", "U", "IN", "NN", "D", ""] if code in set(df["priority_code"].fillna(""))]
+all_codes = [code for code in STATUS_SEQUENCE if code in set(df["priority_code"].fillna(""))]
 code_label_map = {code: f"{code or 'Blank'} - {STATUS_MAP.get(code, 'Unspecified')}" for code in all_codes}
 
 col1, col2, col3 = st.columns(3)
@@ -241,18 +291,77 @@ if selected_staff:
 
 f_staff = build_staff_view(filtered)
 
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Projects", filtered["project"].nunique())
-k2.metric("Tasks", len(filtered))
-k3.metric("Staff involved", f_staff["staff"].nunique())
-k4.metric("With notes", int(filtered["has_notes"].sum()))
+project_health_rows = []
+for project_name, project_df in filtered.groupby("project", dropna=False):
+    row = {"project": project_name}
+    row.update(compute_project_health(project_df))
+    project_health_rows.append(row)
+project_health = pd.DataFrame(project_health_rows).sort_values(["health_level", "ui_tasks", "u_tasks", "project"])
 
 view_cols = ["project", "task", "owner", "support", "notes", "priority_code", "priority", "assigned_staff_text"]
 
-tab1, tab2, tab3, tab4 = st.tabs(["Parsed Tasks", "Staff Dashboard", "Project Dashboard", "Action Board"])
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+projects_count = int(filtered["project"].nunique())
+tasks_count = int(len(filtered))
+staff_count = int(f_staff["staff"].nunique())
+done_count = int((filtered["priority_code"] == "D").sum())
+ui_backlog = int((filtered["priority_code"] == "UI").sum())
+completion_rate = (done_count / tasks_count * 100) if tasks_count else 0
+k1.metric("Projects", projects_count)
+k2.metric("Tasks", tasks_count)
+k3.metric("Staff involved", staff_count)
+k4.metric("Done", done_count)
+k5.metric("Urgent & Important", ui_backlog)
+k6.metric("Completion %", f"{completion_rate:.1f}%")
+
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "Executive Summary",
+    "Parsed Tasks",
+    "Staff Dashboard",
+    "Project Dashboard",
+    "Action Board",
+])
 
 with tab1:
-    st.dataframe(filtered[view_cols].sort_values(["priority_code", "project", "task"]), use_container_width=True, hide_index=True)
+    st.subheader("Executive portfolio view")
+    executive_cols = [
+        "health_signal",
+        "health_level",
+        "project",
+        "total_tasks",
+        "done_tasks",
+        "done_rate_pct",
+        "ui_tasks",
+        "u_tasks",
+        "in_tasks",
+        "nn_tasks",
+        "blank_tasks",
+        "backlog_tasks",
+        "executive_remark",
+    ]
+    st.dataframe(project_health[executive_cols], use_container_width=True, hide_index=True)
+
+    summary_text = []
+    red_count = int((project_health["health_level"] == "Red").sum()) if not project_health.empty else 0
+    yellow_count = int((project_health["health_level"] == "Yellow").sum()) if not project_health.empty else 0
+    green_count = int((project_health["health_level"] == "Green").sum()) if not project_health.empty else 0
+    summary_text.append(f"{projects_count} projects monitored")
+    summary_text.append(f"{red_count} red")
+    summary_text.append(f"{yellow_count} yellow")
+    summary_text.append(f"{green_count} green")
+    summary_text.append(f"{completion_rate:.1f}% portfolio completion")
+    st.info(" | ".join(summary_text))
+
+    st.download_button(
+        "Download executive summary CSV",
+        data=download_df(project_health[executive_cols]),
+        file_name="imdo_executive_summary.csv",
+        mime="text/csv",
+    )
+
+with tab2:
+    st.dataframe(filtered[view_cols].sort_values(["sort_priority", "project", "task"]), use_container_width=True, hide_index=True)
     st.download_button(
         "Download parsed CSV",
         data=download_df(filtered[view_cols]),
@@ -260,7 +369,7 @@ with tab1:
         mime="text/csv",
     )
 
-with tab2:
+with tab3:
     staff_summary = (
         f_staff.groupby(["staff", "priority_code"], dropna=False)
         .size()
@@ -277,37 +386,40 @@ with tab2:
     c1, c2 = st.columns([1, 1])
     with c1:
         st.subheader("Task count per staff")
-        st.bar_chart(staff_total.set_index("staff")["total_tasks"])
+        if not staff_total.empty:
+            st.bar_chart(staff_total.set_index("staff")["total_tasks"])
     with c2:
         st.subheader("Priority mix by staff")
-        pivot = staff_summary.pivot(index="staff", columns="priority_code", values="count").fillna(0)
-        st.bar_chart(pivot)
+        if not staff_summary.empty:
+            pivot = staff_summary.pivot(index="staff", columns="priority_code", values="count").fillna(0)
+            st.bar_chart(pivot)
 
     focus_staff = st.selectbox("Select staff member", options=["All"] + all_staff, index=0)
     focus_code = st.selectbox(
         "Select priority bucket for selected staff",
-        options=[["All"] + [c for c in ["UI", "U", "IN", "NN", "D", ""]] if c in set(f_staff["priority_code"].fillna(""))],
+        options=["All"] + [c for c in STATUS_SEQUENCE if c in set(f_staff["priority_code"].fillna(""))],
         index=0,
         format_func=lambda x: "All" if x == "All" else code_label_map.get(x, x),
     )
 
     if focus_staff != "All":
         staff_tasks = filtered[filtered["assigned_staff"].apply(lambda x: focus_staff in x)].copy()
+        metric_base = staff_tasks.copy()
         if focus_code != "All":
             staff_tasks = staff_tasks[staff_tasks["priority_code"] == focus_code]
 
         metric_cols = st.columns(5)
-        metric_cols[0].metric("UI", int((staff_tasks["priority_code"] == "UI").sum()))
-        metric_cols[1].metric("U", int((staff_tasks["priority_code"] == "U").sum()))
-        metric_cols[2].metric("IN", int((staff_tasks["priority_code"] == "IN").sum()))
-        metric_cols[3].metric("NN", int((staff_tasks["priority_code"] == "NN").sum()))
-        metric_cols[4].metric("D", int((staff_tasks["priority_code"] == "D").sum()))
+        metric_cols[0].metric("UI", int((metric_base["priority_code"] == "UI").sum()))
+        metric_cols[1].metric("U", int((metric_base["priority_code"] == "U").sum()))
+        metric_cols[2].metric("IN", int((metric_base["priority_code"] == "IN").sum()))
+        metric_cols[3].metric("NN", int((metric_base["priority_code"] == "NN").sum()))
+        metric_cols[4].metric("D", int((metric_base["priority_code"] == "D").sum()))
 
         st.markdown(f"### Tasks for {focus_staff}")
-        for code in ["UI", "U", "IN", "NN", "D", ""]:
-            section = staff_tasks[staff_tasks["priority_code"] == code].sort_values(["project", "task"])
+        for code in STATUS_SEQUENCE:
             if focus_code not in ["All", code]:
                 continue
+            section = staff_tasks[staff_tasks["priority_code"] == code].sort_values(["project", "task"])
             if section.empty:
                 continue
             label = code_label_map.get(code, f"{code or 'Blank'}")
@@ -316,7 +428,7 @@ with tab2:
     else:
         st.dataframe(staff_total, use_container_width=True, hide_index=True)
 
-with tab3:
+with tab4:
     project_summary = (
         filtered.groupby(["project", "priority_code"], dropna=False)
         .size()
@@ -332,11 +444,13 @@ with tab3:
     c1, c2 = st.columns([1, 1])
     with c1:
         st.subheader("Tasks per project")
-        st.bar_chart(project_total.set_index("project")["total_tasks"])
+        if not project_total.empty:
+            st.bar_chart(project_total.set_index("project")["total_tasks"])
     with c2:
         st.subheader("Priority mix by project")
-        project_pivot = project_summary.pivot(index="project", columns="priority_code", values="count").fillna(0)
-        st.bar_chart(project_pivot)
+        if not project_summary.empty:
+            project_pivot = project_summary.pivot(index="project", columns="priority_code", values="count").fillna(0)
+            st.bar_chart(project_pivot)
 
     focus_project = st.selectbox("Select project", options=["All"] + all_projects, index=0)
     if focus_project != "All":
@@ -347,11 +461,14 @@ with tab3:
             hide_index=True,
         )
 
-with tab4:
+with tab5:
     st.subheader("Top action items")
-    urgent_first = filtered.copy().sort_values(["sort_priority", "project", "task"])
+    action_df = filtered.copy().sort_values(["sort_priority", "project", "task"])
+    if not show_done_in_action_board:
+        action_df = action_df[action_df["priority_code"] != "D"]
+
     st.dataframe(
-        urgent_first[["project", "task", "owner", "support", "notes", "priority_code", "priority"]],
+        action_df[["project", "task", "owner", "support", "notes", "priority_code", "priority"]],
         use_container_width=True,
         hide_index=True,
     )
@@ -370,9 +487,11 @@ with tab4:
         .reset_index()
         .sort_values(["ui_tasks", "u_tasks", "in_tasks", "total_tasks"], ascending=False)
     )
+    if not workload.empty:
+        workload["completion_pct"] = (workload["d_tasks"] / workload["total_tasks"] * 100).round(1)
     st.dataframe(workload, use_container_width=True, hide_index=True)
 
-with st.expander("Notes about the parser"):
+with st.expander("Notes about the parser and executive logic"):
     st.markdown(
         textwrap.dedent(
             """
@@ -380,7 +499,11 @@ with st.expander("Notes about the parser"):
             - Task rows are read from pasted tab-separated lines.
             - Continuation lines without owners/support are appended to the previous task's notes.
             - Staff names in owner/support are split using semicolons or commas.
-            - Priority codes are preserved exactly, so each staff member can be filtered into **UI**, **U**, **IN**, and **NN** buckets.
+            - Priority codes supported are **UI**, **U**, **IN**, **NN**, and **D**.
+            - Executive health logic is simplified for dashboard use:
+              - **Red** = any UI task exists
+              - **Yellow** = no UI, but U or IN backlog remains
+              - **Green** = completed or no active backlog remains
             """
         )
     )

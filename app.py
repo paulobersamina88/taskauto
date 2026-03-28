@@ -286,7 +286,7 @@ with tab2:
     focus_staff = st.selectbox("Select staff member", options=["All"] + all_staff, index=0)
     focus_code = st.selectbox(
         "Select priority bucket for selected staff",
-        options=["All"] + [c for c in ["UI", "U", "IN", "NN", "D", ""]] if c in set(f_staff["priority_code"].fillna(""))],
+        options=[["All"] + [c for c in ["UI", "U", "IN", "NN", "D", ""]] if c in set(f_staff["priority_code"].fillna(""))],
         index=0,
         format_func=lambda x: "All" if x == "All" else code_label_map.get(x, x),
     )

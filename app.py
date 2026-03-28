@@ -13,10 +13,10 @@ STATUS_MAP = {
     "IN": "Important, Not Urgent",
     "U": "Urgent, Not Important",
     "NN": "Not Important, Not Urgent",
-    "": "Unspecified",
+    "D": "Done",
 }
 
-STATUS_SORT = {"UI": 0, "U": 1, "IN": 2, "NN": 3, "": 4}
+STATUS_SORT = {"UI": 0, "U": 1, "IN": 2, "NN": 3, "D": 4}
 
 DEFAULT_TEXT = """\
 \t\tOWNER\tSUPPORT\tSTATUS\tPriority

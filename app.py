@@ -124,7 +124,7 @@ def parse_imdo_text(raw_text: str) -> pd.DataFrame:
         notes = fifth
         priority_code = sixth.upper()
 
-        if not priority_code and fifth.upper() in {"UI", "IN", "U", "NN"}:
+        if not priority_code and fifth.upper() in {"UI", "IN", "U", "NN", "D"}:
             priority_code = fifth.upper()
             notes = ""
         if not owner and second and any(ch.isalpha() for ch in second):
@@ -205,6 +205,7 @@ with st.sidebar:
     st.write("U = Urgent, Not Important")
     st.write("IN = Important, Not Urgent")
     st.write("NN = Not Important, Not Urgent")
+    st.write("D = Done")
 
 
 df = parse_imdo_text(raw_text)
@@ -217,7 +218,7 @@ staff_df = build_staff_view(df)
 
 all_staff = sorted([x for x in staff_df["staff"].dropna().unique().tolist() if x])
 all_projects = sorted(df["project"].dropna().unique().tolist())
-all_codes = [code for code in ["UI", "U", "IN", "NN", ""] if code in set(df["priority_code"].fillna(""))]
+all_codes = [code for code in ["UI", "U", "IN", "NN", "D", ""] if code in set(df["priority_code"].fillna(""))]
 code_label_map = {code: f"{code or 'Blank'} - {STATUS_MAP.get(code, 'Unspecified')}" for code in all_codes}
 
 col1, col2, col3 = st.columns(3)
@@ -285,7 +286,7 @@ with tab2:
     focus_staff = st.selectbox("Select staff member", options=["All"] + all_staff, index=0)
     focus_code = st.selectbox(
         "Select priority bucket for selected staff",
-        options=["All"] + [c for c in ["UI", "U", "IN", "NN", ""] if c in set(f_staff["priority_code"].fillna(""))],
+        options=["All"] + [c for c in ["UI", "U", "IN", "NN", "D", ""]] if c in set(f_staff["priority_code"].fillna(""))],
         index=0,
         format_func=lambda x: "All" if x == "All" else code_label_map.get(x, x),
     )
@@ -295,14 +296,15 @@ with tab2:
         if focus_code != "All":
             staff_tasks = staff_tasks[staff_tasks["priority_code"] == focus_code]
 
-        metric_cols = st.columns(4)
+        metric_cols = st.columns(5)
         metric_cols[0].metric("UI", int((staff_tasks["priority_code"] == "UI").sum()))
         metric_cols[1].metric("U", int((staff_tasks["priority_code"] == "U").sum()))
         metric_cols[2].metric("IN", int((staff_tasks["priority_code"] == "IN").sum()))
         metric_cols[3].metric("NN", int((staff_tasks["priority_code"] == "NN").sum()))
+        metric_cols[4].metric("D", int((staff_tasks["priority_code"] == "D").sum()))
 
         st.markdown(f"### Tasks for {focus_staff}")
-        for code in ["UI", "U", "IN", "NN", ""]:
+        for code in ["UI", "U", "IN", "NN", "D", ""]:
             section = staff_tasks[staff_tasks["priority_code"] == code].sort_values(["project", "task"])
             if focus_code not in ["All", code]:
                 continue
@@ -363,6 +365,7 @@ with tab4:
             u_tasks=("priority_code", lambda s: int((s == "U").sum())),
             in_tasks=("priority_code", lambda s: int((s == "IN").sum())),
             nn_tasks=("priority_code", lambda s: int((s == "NN").sum())),
+            d_tasks=("priority_code", lambda s: int((s == "D").sum())),
         )
         .reset_index()
         .sort_values(["ui_tasks", "u_tasks", "in_tasks", "total_tasks"], ascending=False)
